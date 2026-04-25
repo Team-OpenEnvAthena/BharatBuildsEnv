@@ -1,6 +1,5 @@
 ---
 title: BharatBuildsEnv
-emoji: 🇮🇳
 colorFrom: orange
 colorTo: green
 sdk: docker
