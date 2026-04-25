@@ -2,13 +2,20 @@
 BharatBuilds — RL Environment
 OpenEnv-compliant: inherits from Environment[BharatAction, BharatObservation, BharatState]
 All static data imported from data.py
+
+Fixes applied:
+- Removed duplicate MAX_STEPS definition
+- Validation threshold now reads from founder profile (not hardcoded 5)
+- action.dict() replaced with action.model_dump() for Pydantic v2
+- Double penalty removed: verifier rewards are additive, env_reward no longer
+  re-penalises jargon/autonomy (those are handled by verifiers exclusively)
+- Redundant reset fields removed
 """
 
 import random
-from typing import Optional, Any
 from openenv.core import Environment, Observation, Action, State
 from verifiers import run_all_verifiers
-from data import FOUNDERS, IDEAS, RESOURCES, PHASES, PHASE_GOALS
+from data import FOUNDERS, IDEAS, RESOURCES, PHASES, PHASE_GOALS, VALIDATION_THRESHOLDS
 
 MAX_STEPS = 50
 
@@ -38,6 +45,8 @@ class BharatObservation(Observation):
     founder_capital_inr: float = 10000.0
     founder_prior_attempt: bool = False
     founder_emotional_state: str = "excited"
+    founder_user_relationship: str = "familiar"
+    validation_threshold: int = 4
     idea_description: str = ""
     validation_interviews_done: int = 0
     mvp_shipped: bool = False
@@ -65,9 +74,8 @@ class BharatState(State):
     cumulative_reward: float = 0.0
     done: bool = False
 
-MAX_STEPS = 50
 
-# ── Environment ──────────────────────────────────────────────
+# ── Environment ───────────────────────────────────────────────
 
 class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState]):
     SUPPORTS_CONCURRENT_SESSIONS = True
@@ -103,40 +111,32 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
             self._f = matches[0] if matches else random.choice(FOUNDERS)
         else:
             self._f = random.choice(FOUNDERS)
-        self._phase_idx = 0
-        self._step_count = 0
-        self._cumulative_reward = 0.0
-        self._interviews = 0
-        self._first_customer = False
-        self._mvp_shipped = False
-        self._dropout_risk = 0.0
-        self._tasks_completed = 0
-        self._tasks_ignored = 0
-        self._felt_unblocked = False
-        self._felt_judged = False
-        self._last_verifier_flags = []
-        self._last_verifier_scores = {}
         return self._observe(reward=0.0, terminated=False, truncated=False)
 
     def step(self, action: BharatAction, timeout_s=None, **kwargs) -> BharatObservation:
-        # Run verifiers first — they shape the reward independently
+        # FIX: use model_dump() not dict() for Pydantic v2
+        action_dict = action.model_dump()
         verifier_state = self._verifier_state_dict()
-        vresult = run_all_verifiers(action.dict(), verifier_state)
+
+        # Run verifiers first
+        vresult = run_all_verifiers(action_dict, verifier_state)
         self._last_verifier_flags = vresult.flags
         self._last_verifier_scores = vresult.scores
 
         if vresult.blocked:
-            # Hard safety block — strong penalty, episode continues but punished
             reward = vresult.penalty
             self._cumulative_reward += reward
             self._step_count += 1
-            return self._observe(reward=reward, terminated=False, truncated=self._step_count >= MAX_STEPS)
+            return self._observe(reward=reward, terminated=False,
+                                 truncated=self._step_count >= MAX_STEPS)
 
-        # Simulate human response
+        # Simulate human reaction
         reaction = self._simulate_human(action)
         self._update_state(reaction)
 
-        # Combine env reward + verifier reward
+        # FIX: No double penalty — env_reward covers human-signal rewards only.
+        # Verifier rewards cover quality checks (jargon, autonomy, accessibility etc.)
+        # They are separate, non-overlapping signals.
         env_reward = self._reward(action, reaction)
         verifier_reward = vresult.total
         reward = env_reward + verifier_reward
@@ -159,7 +159,6 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
     # ── Private ───────────────────────────────────────────────
 
     def _verifier_state_dict(self) -> dict:
-        """Expose minimal state dict for verifiers (avoid circular imports)."""
         f = self._f or FOUNDERS[0]
         return {
             "phase": PHASES[min(self._phase_idx, len(PHASES)-1)],
@@ -169,7 +168,7 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
                 "language":         f["language"],
             },
             "engagement": {
-                "dropout_risk": self._dropout_risk,
+                "dropout_risk":    self._dropout_risk,
                 "tasks_completed": self._tasks_completed,
             }
         }
@@ -178,30 +177,28 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
         f = self._f or FOUNDERS[0]
         phase = PHASES[min(self._phase_idx, len(PHASES) - 1)]
         res = RESOURCES.get(f["domain"], RESOURCES["edtech"])
+        relation = f.get("founder_user_relationship", "familiar")
+        threshold = f.get("validation_threshold",
+                          VALIDATION_THRESHOLDS.get(relation, 4))
         return BharatObservation(
-            phase=phase,
-            phase_number=self._phase_idx,
+            phase=phase, phase_number=self._phase_idx,
             phase_goal=PHASE_GOALS.get(phase, ""),
-            founder_name=f["name"],
-            founder_location=f["location"],
-            founder_tier=f["tier"],
-            founder_language=f["language"],
+            founder_name=f["name"], founder_location=f["location"],
+            founder_tier=f["tier"], founder_language=f["language"],
             founder_domain=f["domain"],
             founder_digital_literacy=f["digital_literacy"],
             founder_capital_inr=f["capital_inr"],
             founder_prior_attempt=f["prior_attempt"],
             founder_emotional_state=f["emotional_state"],
+            founder_user_relationship=relation,
+            validation_threshold=threshold,
             idea_description=IDEAS.get(f["domain"], "I have an idea"),
             validation_interviews_done=self._interviews,
-            mvp_shipped=self._mvp_shipped,
-            first_customer=self._first_customer,
+            mvp_shipped=self._mvp_shipped, first_customer=self._first_customer,
             dropout_risk=self._dropout_risk,
-            tasks_completed=self._tasks_completed,
-            tasks_ignored=self._tasks_ignored,
-            felt_unblocked=self._felt_unblocked,
-            felt_judged=self._felt_judged,
-            available_schemes=res["schemes"],
-            available_tools=res["tools"],
+            tasks_completed=self._tasks_completed, tasks_ignored=self._tasks_ignored,
+            felt_unblocked=self._felt_unblocked, felt_judged=self._felt_judged,
+            available_schemes=res["schemes"], available_tools=res["tools"],
             available_communities=res["communities"],
             step=self._step_count, done=terminated or truncated,
             reward=reward, terminated=terminated, truncated=truncated,
@@ -226,13 +223,18 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
         gave_positive  = did_task and random.random() < 0.6
         gave_negative  = felt_judged or (not did_task and random.random() < 0.3)
 
+        # FIX: use per-founder validation threshold, not hardcoded 5
+        relation  = f.get("founder_user_relationship", "familiar")
+        threshold = f.get("validation_threshold",
+                          VALIDATION_THRESHOLDS.get(relation, 4))
+
         progressed = False
         p = self._phase_idx
         if p == 0 and did_task:
             progressed = random.random() < 0.35
         elif p == 1:
             if did_task: self._interviews += random.randint(1, 2)
-            progressed = self._interviews >= 5
+            progressed = self._interviews >= threshold   # FIX: was hardcoded >= 5
         elif p == 2 and did_task:
             progressed = random.random() < 0.4
         elif p == 3 and did_task:
@@ -258,9 +260,9 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
         else:             self._tasks_ignored   += 1
         self._felt_judged    = r["felt_judged"]
         self._felt_unblocked = r["felt_unblocked"]
-        delta  =  0.10 if not r["did_task"]    else -0.05
-        delta +=  0.15 if r["felt_judged"]     else  0.0
-        delta +=  0.10 if r["dropout_signal"]  else  0.0
+        delta  =  0.10 if not r["did_task"]   else -0.05
+        delta +=  0.15 if r["felt_judged"]    else  0.0
+        delta +=  0.10 if r["dropout_signal"] else  0.0
         self._dropout_risk = max(0.0, min(1.0, self._dropout_risk + delta))
         if r["phase_progressed"] and self._phase_idx < len(PHASES) - 1:
             self._phase_idx += 1
@@ -268,6 +270,11 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
                 emotional_state=random.choice(["excited", "determined", "uncertain"]))
 
     def _reward(self, action: BharatAction, r: dict) -> float:
+        """
+        Environment reward — human signal only.
+        Quality checks (jargon, autonomy, accessibility) are handled
+        exclusively by verifiers to avoid double penalties.
+        """
         reward = 0.0
         if r["did_task"]:         reward += 10.0
         if r["returned"]:         reward +=  8.0
@@ -275,11 +282,14 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
         if r["gave_positive"]:    reward +=  5.0
         if r["phase_progressed"]: reward += 20.0
         if action.resource_recommended: reward += 8.0
-        if self._interviews >= 5:            reward += 15.0
-        if self._first_customer:             reward += 30.0
+        # Milestone bonuses
+        f = self._f
+        threshold = f.get("validation_threshold",
+                    VALIDATION_THRESHOLDS.get(f.get("founder_user_relationship","familiar"), 4))
+        if self._interviews >= threshold: reward += 15.0
+        if self._first_customer:          reward += 30.0
         if self._phase_idx >= len(PHASES)-1: reward += 50.0
-        if action.used_jargon and self._f["digital_literacy"] < 0.5: reward -= 10.0
-        if action.made_decision_for_human: reward -= 20.0
+        # Human-signal penalties only (not quality penalties — those are in verifiers)
         if r["felt_judged"]:    reward -= 15.0
         if r["gave_negative"]:  reward -=  8.0
         if r["dropout_signal"]: reward -= 25.0

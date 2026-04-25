@@ -1,12 +1,12 @@
 name: BharatBuildsEnv
-version: 0.1.0
+version: 0.2.0
 description: >
   A human-first startup co-founder RL environment for Indian entrepreneurs
   from Tier 2/3 cities. Trains an LLM to be an empathetic, jargon-free,
   resource-aware collaborative partner — not an autonomous agent.
   The AI is rewarded for helping the human take real steps, not for
   deciding for them.
-author: BharatBuilds Team
+author: BharatBuilds Team (Isha Khatana, Garima Mahato)
 theme: wild_card
 tags:
   - startup
@@ -14,6 +14,7 @@ tags:
   - human-collaborative
   - personalized
   - social-impact
+  - long-horizon
 
 environment:
   class: BharatBuildsEnv
@@ -47,6 +48,8 @@ observation_space:
     founder_capital_inr: float
     founder_prior_attempt: bool
     founder_emotional_state: str
+    founder_user_relationship: str
+    validation_threshold: int
     idea_description: str
     validation_interviews_done: int
     mvp_shipped: bool
@@ -62,36 +65,66 @@ observation_space:
     step: int
     done: bool
     reward: float
+    terminated: bool
+    truncated: bool
+    verifier_flags: list
+    verifier_scores: dict
 
 reward:
-  components:
+  design_principle: >
+    Two non-overlapping signal sources to prevent double penalties:
+    (1) env_reward — human engagement signals only
+    (2) verifier_reward — AI quality signals only
+  env_components:
     - name: task_completion
-      weight: 10
+      value: +10
       description: Human took the suggested action
     - name: retention
-      weight: 8
+      value: +8
       description: Human returned to the next session
-    - name: unblocked
-      weight: 6
+    - name: felt_unblocked
+      value: +6
       description: Human felt unblocked, not judged
+    - name: positive_feedback
+      value: +5
+      description: Human gave positive feedback
     - name: phase_progression
-      weight: 20
-      description: Human advanced to the next startup phase
+      value: +20
+      description: Human advanced to next startup phase
+    - name: resource_used
+      value: +8
+      description: AI recommended an accessible resource
+    - name: validation_complete
+      value: +15
+      description: Founder met their validation threshold (varies by relationship)
     - name: first_customer
-      weight: 30
-      description: Human acquired their first customer
+      value: +30
+      description: Founder acquired first customer
     - name: journey_complete
-      weight: 50
-      description: Human completed all 7 phases
-    - name: verifier_composite
-      weight: variable
-      description: Safety, autonomy, accessibility, clarity, engagement, progress checks
-  penalties:
-    - jargon_for_low_literacy: -10
-    - deciding_for_human: -20
-    - felt_judged: -15
-    - dropout_signal: -25
-    - high_dropout_risk: -20
+      value: +50
+      description: Founder completed all 7 phases
+    - name: felt_judged
+      value: -15
+      description: Human felt judged by the AI
+    - name: dropout_signal
+      value: -25
+      description: Human disengaging and giving negative feedback
+    - name: high_dropout_risk
+      value: -20
+      description: Dropout risk exceeded 0.8
+  verifier_components:
+    - name: safety
+      description: Blocks prompt injection and reward hacking (-50 if blocked)
+    - name: autonomy
+      description: Penalises AI making decisions for human (-20), rewards questions (+5)
+    - name: accessibility
+      description: Penalises unaffordable recommendations (-10), rewards free resources (+8)
+    - name: clarity
+      description: Penalises unexplained jargon for low-literacy founders (-10)
+    - name: engagement
+      description: Rewards concrete action verbs (+5), right emotional tone (+3)
+    - name: progress
+      description: Rewards phase-aligned responses (+8), penalises misalignment (-6)
 
 server:
   host: 0.0.0.0
