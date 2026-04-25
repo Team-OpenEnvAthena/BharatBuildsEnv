@@ -1,62 +1,141 @@
-from dataclasses import dataclass, field
-from enum import IntEnum
-from typing import Optional
+"""
+Data models for the BharatBuilds Environment.
 
-class Phase(IntEnum):
-    IDEA_ARTICULATION = 0
-    VALIDATION        = 1
-    MVP_SCOPING       = 2
-    RESOURCE_MAPPING  = 3
-    BUILD_COMPANION   = 4
-    FIRST_CUSTOMER    = 5
-    SIGNAL_READING    = 6
-    DONE              = 7
+BharatBuilds trains an LLM to be an empathetic startup co-founder for
+first-time Indian entrepreneurs from Tier 2/3 cities. The AI is rewarded
+for helping the human take real steps — not for deciding for them.
+"""
 
-@dataclass
-class FounderProfile:
-    name: str
-    location: str
-    tier: str
-    language: str
-    domain: str
-    digital_literacy: float
-    capital_inr: float
-    prior_attempt: bool
-    emotional_state: str
+from typing import Dict, List, Optional
+from pydantic import Field
+from openenv.core.env_server.types import Action, Observation
 
-@dataclass
-class StartupIdea:
-    raw_description: str
-    problem_statement: Optional[str] = None
-    target_user: Optional[str] = None
-    validation_interviews_done: int = 0
-    mvp_shipped: bool = False
-    first_customer: bool = False
 
-@dataclass
-class EngagementSignals:
-    total_sessions: int = 0
-    tasks_completed: int = 0
-    tasks_ignored: int = 0
-    positive_feedback: int = 0
-    negative_feedback: int = 0
-    felt_judged: bool = False
-    felt_unblocked: bool = False
-    dropout_risk: float = 0.0
+class BharatAction(Action):
+    """
+    Action submitted by the AI co-founder agent each turn.
 
-@dataclass
-class ResourceContext:
-    available_schemes: list = field(default_factory=list)
-    recommended_tools: list = field(default_factory=list)
-    nearby_communities: list = field(default_factory=list)
+    The agent must craft a response that unblocks the founder without
+    deciding for them, using accessible language and recommending
+    only resources they can actually afford.
+    """
 
-@dataclass
-class EnvState:
-    phase: Phase
-    founder: FounderProfile
-    idea: StartupIdea
-    engagement: EngagementSignals
-    resources: ResourceContext
-    step_count: int = 0
-    cumulative_reward: float = 0.0
-    done: bool = False
+    ai_response: str = Field(
+        default="",
+        description="Main conversational response from the AI co-founder",
+    )
+    suggested_task: str = Field(
+        default="",
+        description="One concrete, small action the founder can take next",
+    )
+    task_rationale: str = Field(
+        default="",
+        description="Brief explanation of why this task matters at this phase",
+    )
+    used_jargon: bool = Field(
+        default=False,
+        description="True if response contains unexplained technical/startup jargon",
+    )
+    made_decision_for_human: bool = Field(
+        default=False,
+        description="True if the AI decided something that the founder should decide",
+    )
+    resource_recommended: str = Field(
+        default="",
+        description="Name of a specific resource or scheme mentioned (empty if none)",
+    )
+    emotional_tone: str = Field(
+        default="encouraging",
+        description="Emotional register of the response: encouraging/neutral/concerned",
+    )
+
+
+class BharatObservation(Observation):
+    """
+    Observation returned after each step — the full state of the founder's journey.
+
+    The AI agent uses this to decide how to respond next. Key signals are:
+    - phase / phase_goal: what stage the founder is at
+    - founder_* fields: who the founder is (literacy, capital, emotional state)
+    - dropout_risk: urgency signal — high dropout demands immediate action
+    - verifier_flags / verifier_scores: feedback on the last action's quality
+    """
+
+    # ── Phase ─────────────────────────────────────────────────────
+    phase: str = Field(default="IDEA_ARTICULATION", description="Current startup phase")
+    phase_number: int = Field(default=0, description="Phase index (0–7)")
+    phase_goal: str = Field(default="", description="What the AI should help with now")
+
+    # ── Founder profile ───────────────────────────────────────────
+    founder_name: str = Field(default="", description="Founder's name")
+    founder_location: str = Field(default="", description="City, State")
+    founder_tier: str = Field(default="tier2", description="tier3/rural | tier2 | metro")
+    founder_language: str = Field(default="hindi", description="Primary language")
+    founder_domain: str = Field(default="edtech", description="Startup domain")
+    founder_digital_literacy: float = Field(
+        default=0.5, description="0.0 (none) to 1.0 (expert)"
+    )
+    founder_capital_inr: float = Field(default=10000.0, description="Available capital in INR")
+    founder_prior_attempt: bool = Field(
+        default=False, description="Has attempted a startup before"
+    )
+    founder_emotional_state: str = Field(
+        default="excited", description="excited | uncertain | discouraged | determined"
+    )
+    founder_user_relationship: str = Field(
+        default="familiar",
+        description="self | close | familiar | outsider — proximity to the problem",
+    )
+    validation_threshold: int = Field(
+        default=4,
+        description="Number of validation conversations required before advancing",
+    )
+
+    # ── Idea & progress ───────────────────────────────────────────
+    idea_description: str = Field(default="", description="Raw idea description")
+    validation_interviews_done: int = Field(
+        default=0, description="Number of validation conversations completed"
+    )
+    mvp_shipped: bool = Field(default=False, description="MVP has been launched")
+    first_customer: bool = Field(default=False, description="First customer acquired")
+
+    # ── Engagement signals ────────────────────────────────────────
+    dropout_risk: float = Field(
+        default=0.0, description="0.0 (engaged) to 1.0 (about to quit)"
+    )
+    tasks_completed: int = Field(default=0, description="Total tasks founder completed")
+    tasks_ignored: int = Field(default=0, description="Total tasks founder skipped")
+    felt_unblocked: bool = Field(default=False, description="Felt unblocked this step")
+    felt_judged: bool = Field(default=False, description="Felt judged or talked down to")
+
+    # ── Resources ─────────────────────────────────────────────────
+    available_schemes: List[str] = Field(
+        default_factory=list, description="Government/NGO schemes available"
+    )
+    available_tools: List[str] = Field(
+        default_factory=list, description="Free tools suited to this founder"
+    )
+    available_communities: List[str] = Field(
+        default_factory=list, description="Local communities or networks"
+    )
+
+    # ── Episode metadata ──────────────────────────────────────────
+    step: int = Field(default=0, description="Current step number")
+    done: bool = Field(default=False, description="Episode is over")
+    reward: float = Field(default=0.0, description="Reward from last step")
+    terminated: bool = Field(
+        default=False, description="Episode ended naturally (journey complete / dropout)"
+    )
+    truncated: bool = Field(
+        default=False, description="Episode ended by step limit"
+    )
+
+    # ── Verifier feedback ─────────────────────────────────────────
+    verifier_flags: List[str] = Field(
+        default_factory=list,
+        description="Human-readable quality flags from the 6 verifiers",
+    )
+    verifier_scores: Dict[str, float] = Field(
+        default_factory=dict,
+        description="Per-verifier numeric scores",
+    )

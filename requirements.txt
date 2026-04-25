@@ -1,6 +1,0 @@
-openenv-core>=0.2.3
-httpx
-fastapi
-uvicorn[standard]
-pydantic>=2.0
-beartype>=0.18.0

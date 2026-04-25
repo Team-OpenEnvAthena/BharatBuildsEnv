@@ -1,4 +1,18 @@
-# BharatBuilds RL Environment
+---
+title: BharatBuildsEnv
+emoji: 🇮🇳
+colorFrom: orange
+colorTo: green
+sdk: docker
+pinned: true
+license: mit
+app_port: 8000
+base_path: /web
+tags:
+  - openenv
+---
+
+# 🇮🇳 BharatBuilds RL Environment
 
 > *"McKinsey charges ₹5 crore to give a large company its strategy.  
 > We're training an AI to be that thinking partner for someone with ₹500 in their pocket and an idea that could change their community."*
@@ -21,7 +35,7 @@ BharatBuildsEnv is an OpenEnv-compliant environment that simulates the journey o
 
 ```
 Phase 0: IDEA_ARTICULATION  → Turn a vague idea into a clear problem statement
-Phase 1: VALIDATION         → Talk to 5 real people (not skip this step)
+Phase 1: VALIDATION         → Talk to real people (threshold varies by founder relationship)
 Phase 2: MVP_SCOPING        → Identify the smallest possible test
 Phase 3: RESOURCE_MAPPING   → Find real, free Indian resources
 Phase 4: BUILD_COMPANION    → Unblock daily progress
@@ -41,38 +55,56 @@ This inversion drives theory-of-mind reasoning:
 - Are they overwhelmed or just unsure?  
 - What one small step will they actually do?
 
+### Relationship-Aware Validation
+
+Validation threshold adapts to how close the founder is to their users:
+
+| Relationship | Example | Threshold |
+|---|---|---|
+| `self` | Kamla the weaver building for weavers | 2 conversations |
+| `close` | Priya building for her tailor mother | 3 conversations |
+| `familiar` | Ravi building for nearby farmers | 4 conversations |
+| `outsider` | Anjali (engineer) building for rural women | 6 conversations |
+
 ---
 
-## Reward Design (6 Independent Verifiers)
+## Reward Design (6 Independent Verifiers + Human Signals)
 
+Two non-overlapping reward sources prevent double penalties:
+
+**Environment reward** (human engagement):
+| Signal | Value |
+|---|---|
+| Human took the task | +10 |
+| Human returned next session | +8 |
+| Human felt unblocked | +6 |
+| Phase progression | +20 |
+| First customer | +30 |
+| Journey complete | +50 |
+
+**Verifier reward** (AI quality):
 | Verifier | What it catches |
 |---|---|
-| **Safety** | Prompt injection, reward hacking attempts |
-| **Autonomy** | Did the AI decide FOR the founder? (−20 penalty) |
-| **Accessibility** | Recommending resources the founder can't afford? |
-| **Clarity** | Using unexplained jargon for low-literacy founders? |
-| **Engagement** | Concrete verb in the task? Right emotional tone? |
-| **Progress** | Is the response aligned with the current phase? |
-
-Plus environment rewards: task completion (+10), retention (+8), phase progression (+20), first customer (+30), journey complete (+50).
-
-Anti-cheating: Multiple independent verifiers make it hard to optimize one signal while ignoring the rest.
+| **Safety** | Prompt injection, reward hacking (−50 if blocked) |
+| **Autonomy** | AI deciding FOR the founder (−20), rewards questions (+5) |
+| **Accessibility** | Unaffordable recommendations (−10), free resources (+8) |
+| **Clarity** | Unexplained jargon for low-literacy founders (−10) |
+| **Engagement** | Concrete action verbs (+5), right emotional tone (+3) |
+| **Progress** | Phase-aligned responses (+8), misalignment (−6) |
 
 ---
 
-## Founder Profiles
+## Founder Profiles (18 diverse personas)
 
-Five diverse Indian founder personas are built in:
+Spanning tier3/rural, tier2, and metro with domains from handicrafts to SaaS:
 
-| Name | Location | Tier | Domain | Literacy | Capital |
-|---|---|---|---|---|---|
-| Priya | Jhansi, UP | Tier 3 | Handicrafts | 0.3 | ₹5,000 |
-| Ravi | Nashik, MH | Tier 2 | Agritech | 0.5 | ₹25,000 |
-| Meera | Coimbatore | Tier 2 | EdTech | 0.7 | ₹15,000 |
-| Suresh | Raipur, CG | Tier 3 | Healthtech | 0.2 | ₹8,000 |
-| Anjali | Pune, MH | Metro | EdTech | 0.9 | ₹1,00,000 |
-
-The human simulation adjusts dropout probability based on: digital literacy, emotional state, whether jargon was used, and whether the AI decided for them.
+| Name | Location | Tier | Domain | Literacy | Capital | Relationship |
+|---|---|---|---|---|---|---|
+| Priya | Jhansi, UP | tier3 | handicrafts | 0.3 | ₹5,000 | self |
+| Kamla | Varanasi, UP | rural | handicrafts | 0.2 | ₹3,000 | self |
+| Ravi | Nashik, MH | tier2 | agritech | 0.5 | ₹25,000 | close |
+| Anjali | Pune, MH | metro | edtech | 0.9 | ₹1,00,000 | outsider |
+| *...14 more* | | | | | | |
 
 ---
 
@@ -87,46 +119,58 @@ The human simulation adjusts dropout probability based on: digital literacy, emo
 | Made decisions for human | Frequent | Rare |
 | Phase progression rate | ~5% | ~35% |
 
-**Before training:** model says *"You must raise venture capital and optimize your CAC/ARR ratio."*  
-**After training:** model says *"Priya, aapka idea bahut achha hai! Kya aap kal 2 logon se — apni dost ya padosi — ye pooch sakti hain: kya unhe ye problem hoti hai? WhatsApp pe bhi kar sakti hain."*
+**Before training:** *"You must raise venture capital and optimize your CAC/ARR ratio."*
+
+**After training:** *"Priya, aapka idea bahut achha hai! Kya aap kal 2 logon se — apni dost ya padosi — ye pooch sakti hain: kya unhe ye problem hoti hai? WhatsApp pe bhi kar sakti hain."*
 
 ---
 
 ## Quick Start
 
-```bash
-# Run locally
-git clone https://huggingface.co/spaces/YOUR_USERNAME/BharatBuildsEnv
-cd BharatBuildsEnv
-pip install -r requirements.txt
-uvicorn server:app --port 8000
+```python
+from BharatBuildsEnv import BharatBuildsClient, BharatAction
 
-# Test with client
-python -c "
-from client import BharatBuildsClient
-c = BharatBuildsClient()
-obs = c.reset(founder_name='Priya')
-print(obs['phase'], obs['idea_description'])
-"
+# Connect to a running server
+with BharatBuildsClient(base_url="http://localhost:8000") as client:
+    result = client.reset(founder_name="Priya")
+    print(result.observation.phase, result.observation.founder_name)
+
+    action = BharatAction(
+        ai_response="Priya, tell me who feels this problem most.",
+        suggested_task="Talk to 2 neighbours about the problem today.",
+        emotional_tone="encouraging",
+    )
+    result = client.step(action)
+    print(result.reward, result.observation.dropout_risk)
 ```
 
-Or pull the Docker container:
+### Run Locally
+
 ```bash
-docker pull registry.hf.space/YOUR_USERNAME-BharatBuildsEnv:latest
-docker run -p 7860:7860 registry.hf.space/YOUR_USERNAME-BharatBuildsEnv:latest
+git clone https://huggingface.co/spaces/athena-openenv/bharatbuilds-env
+cd bharatbuilds-env
+uv sync
+uvicorn server.app:app --host 0.0.0.0 --port 8000
+```
+
+### Docker
+
+```bash
+docker build -t bharatbuilds-env:latest -f server/Dockerfile .
+docker run -p 8000:8000 bharatbuilds-env:latest
 ```
 
 ---
 
 ## Training Script
 
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/YOUR_USERNAME/BharatBuildsEnv/blob/main/bharat_builds_training.ipynb)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/athena-openenv/BharatBuildsEnv/blob/main/bharat_builds_training.ipynb)
 
 Uses: `Qwen2.5-1.5B-Instruct` + `Unsloth` + `TRL GRPO`
 
 Key design choices:
-- **GRPO** (Group Relative Policy Optimization) — no value model needed, efficient on T4
-- **4-bit quantization** via Unsloth — fits in free Colab
+- **GRPO** — no value model, efficient on T4
+- **4-bit quantization** via Unsloth
 - **Multi-reward** combining 6 verifiers + environment simulation
 - **JSON format reward** — model must output valid structured action
 
@@ -134,11 +178,11 @@ Key design choices:
 
 ## Links
 
-- 📓 **Training Notebook:** [Colab Link](https://colab.research.google.com/...)
-- 🤗 **Trained Model:** [HuggingFace Hub](https://huggingface.co/YOUR_USERNAME/bharat-builds-rl)
-- 📊 **Training Logs:** [Weights & Biases](https://wandb.ai/...)
-- 🎥 **Demo Video:** [YouTube](https://youtube.com/...)
-- 📝 **Blog Post:** [HuggingFace Blog](https://huggingface.co/blog/...)
+- 🤗 **HuggingFace Space:** [athena-openenv/bharatbuilds-env](https://huggingface.co/spaces/athena-openenv/bharatbuilds-env)
+- 📓 **Training Notebook:** [Colab](https://colab.research.google.com/github/athena-openenv/BharatBuildsEnv/blob/main/bharat_builds_training.ipynb)
+- 🤗 **Trained Model:** Coming soon
+- 📝 **Blog Post:** Coming soon
+- 🎥 **Demo Video:** Coming soon
 
 ---
 
@@ -146,26 +190,33 @@ Key design choices:
 
 ```
 BharatBuildsEnv/
-├── environment.py          # Core RL environment (OpenEnv compliant)
-├── verifiers.py            # 6 independent reward verifiers
-├── models.py               # Pydantic / dataclass models
-├── server.py               # FastAPI server
-├── client.py               # Python client
-├── openenv.yaml            # OpenEnv manifest
-├── requirements.txt
-├── Dockerfile
-├── bharat_builds_training.ipynb  # Full GRPO training notebook
-└── README.md
+├── __init__.py                    # Package exports (client + models)
+├── models.py                      # BharatAction, BharatObservation
+├── client.py                      # BharatBuildsClient (EnvClient)
+├── data.py                        # (imported by server — see server/data.py)
+├── generate_data.py               # Training data generator
+├── openenv.yaml                   # OpenEnv manifest
+├── pyproject.toml                 # Project metadata
+├── bharat_builds_training.ipynb   # GRPO training notebook
+├── sft_data.jsonl                 # Generated SFT training data
+├── grpo_prompts.jsonl             # Generated GRPO prompts
+└── server/
+    ├── __init__.py                # Server exports
+    ├── BharatBuildsEnv_environment.py  # Core RL environment
+    ├── app.py                     # FastAPI app
+    ├── verifiers.py               # 6 independent reward verifiers
+    ├── data.py                    # Static founder profiles + training data
+    ├── Dockerfile                 # Multi-stage container build
+    └── requirements.txt           # Server dependencies
 ```
 
 ---
 
 ## Hackathon Theme
 
-**Theme #5 — Wild Card** (also touching #3.2 Personalized Tasks)
+**Theme #5 — Wild Card** (also touching #3.2 Personalized Tasks, #2 Long-Horizon Planning)
 
 > *20 years from now, no one should feel they can't build something just because they don't have the resources.*
 
----
-
-*Built for the OpenEnv Hackathon, India 2026*
+*Built for the Meta PyTorch OpenEnv Hackathon, India 2026*  
+*Team: Isha Khatana, Garima Mahato (Team Athena)*

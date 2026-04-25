@@ -1,56 +1,137 @@
 """
-BharatBuilds Client
-Compatible with create_fastapi_app from openenv.core.
-reward, terminated, truncated are embedded inside the observation dict.
+BharatBuilds Environment Client.
+
+Uses a persistent WebSocket connection to the environment server for
+low-latency, multi-step interactions. Each client instance gets its own
+dedicated environment session on the server.
+
+Example (Docker):
+    >>> client = BharatBuildsClient.from_docker_image("bharatbuilds-env:latest")
+    >>> try:
+    ...     result = client.reset(founder_name="Priya")
+    ...     print(result.observation.phase, result.observation.founder_name)
+    ...
+    ...     action = BharatAction(
+    ...         ai_response="Priya, tell me more about who is facing this problem.",
+    ...         suggested_task="Talk to 2 neighbours about the problem today.",
+    ...         emotional_tone="encouraging",
+    ...     )
+    ...     result = client.step(action)
+    ...     print(result.reward, result.observation.dropout_risk)
+    ... finally:
+    ...     client.close()
+
+Example (running server):
+    >>> with BharatBuildsClient(base_url="http://localhost:8000") as client:
+    ...     result = client.reset()
+    ...     result = client.step(BharatAction(ai_response="Hello!"))
 """
-import httpx
 
-class BharatBuildsClient:
-    def __init__(self, base_url="http://localhost:7860"):
-        self.base = base_url.rstrip("/")
-        self.session_id = None
+from typing import Dict
 
-    def reset(self, founder_name=None, seed=None) -> dict:
-        r = httpx.post(f"{self.base}/reset",
-                       json={"founder_name": founder_name, "seed": seed},
-                       timeout=30)
-        r.raise_for_status()
-        data = r.json()
-        self.session_id = data.get("session_id")
-        return data.get("observation", data)
+from openenv.core import EnvClient
+from openenv.core.client_types import StepResult
+from openenv.core.env_server.types import State
 
-    def step(self, action: dict, session_id: str = None) -> tuple:
+from .models import BharatAction, BharatObservation
+
+
+class BharatBuildsClient(EnvClient[BharatAction, BharatObservation, State]):
+    """
+    Client for the BharatBuilds RL Environment.
+
+    The client maintains a WebSocket connection for efficient multi-step
+    rollouts. The server isolates state per session, so multiple clients
+    can run concurrent episodes.
+    """
+
+    def _step_payload(self, action: BharatAction) -> Dict:
         """
-        Returns: (observation, reward, terminated, truncated, info)
-        reward/terminated/truncated extracted from observation since
-        create_fastapi_app embeds them there.
+        Serialize a BharatAction into the JSON payload sent to the server.
+
+        Args:
+            action: BharatAction containing the AI co-founder's response.
+
+        Returns:
+            Dictionary with all action fields.
         """
-        sid = session_id or self.session_id
-        r = httpx.post(f"{self.base}/step",
-                       json={"session_id": sid, "action": action},
-                       timeout=30)
-        r.raise_for_status()
-        d = r.json()
-        obs = d.get("observation", d)
-        # Extract from observation (embedded by OpenEnv)
-        reward     = obs.get("reward", 0.0)
-        terminated = obs.get("terminated", False)
-        truncated  = obs.get("truncated", False)
-        info = {
-            "verifier_flags":  obs.get("verifier_flags", []),
-            "verifier_scores": obs.get("verifier_scores", {}),
-            "phase":           obs.get("phase", ""),
-            "step":            obs.get("step", 0),
-        }
-        return obs, reward, terminated, truncated, info
+        return action.model_dump()
 
-    def state(self, session_id: str = None) -> dict:
-        sid = session_id or self.session_id
-        r = httpx.post(f"{self.base}/state",
-                       json={"session_id": sid},
-                       timeout=30)
-        r.raise_for_status()
-        return r.json().get("state", r.json())
+    def _parse_result(self, payload: Dict) -> StepResult[BharatObservation]:
+        """
+        Deserialize the server's step/reset response into a StepResult.
 
-    def health(self) -> dict:
-        return httpx.get(f"{self.base}/health", timeout=10).json()
+        The server returns:
+            {
+              "observation": { ...all BharatObservation fields... },
+              "reward": float,
+              "done": bool,
+              "truncated": bool,
+              ...
+            }
+
+        Args:
+            payload: Raw JSON dict from the server.
+
+        Returns:
+            StepResult wrapping the parsed BharatObservation.
+        """
+        obs_data = payload.get("observation", payload)
+
+        # Build the observation — all fields have defaults so missing keys are safe
+        observation = BharatObservation(
+            phase=obs_data.get("phase", "IDEA_ARTICULATION"),
+            phase_number=obs_data.get("phase_number", 0),
+            phase_goal=obs_data.get("phase_goal", ""),
+            founder_name=obs_data.get("founder_name", ""),
+            founder_location=obs_data.get("founder_location", ""),
+            founder_tier=obs_data.get("founder_tier", "tier2"),
+            founder_language=obs_data.get("founder_language", "hindi"),
+            founder_domain=obs_data.get("founder_domain", "edtech"),
+            founder_digital_literacy=obs_data.get("founder_digital_literacy", 0.5),
+            founder_capital_inr=obs_data.get("founder_capital_inr", 10000.0),
+            founder_prior_attempt=obs_data.get("founder_prior_attempt", False),
+            founder_emotional_state=obs_data.get("founder_emotional_state", "excited"),
+            founder_user_relationship=obs_data.get("founder_user_relationship", "familiar"),
+            validation_threshold=obs_data.get("validation_threshold", 4),
+            idea_description=obs_data.get("idea_description", ""),
+            validation_interviews_done=obs_data.get("validation_interviews_done", 0),
+            mvp_shipped=obs_data.get("mvp_shipped", False),
+            first_customer=obs_data.get("first_customer", False),
+            dropout_risk=obs_data.get("dropout_risk", 0.0),
+            tasks_completed=obs_data.get("tasks_completed", 0),
+            tasks_ignored=obs_data.get("tasks_ignored", 0),
+            felt_unblocked=obs_data.get("felt_unblocked", False),
+            felt_judged=obs_data.get("felt_judged", False),
+            available_schemes=obs_data.get("available_schemes", []),
+            available_tools=obs_data.get("available_tools", []),
+            available_communities=obs_data.get("available_communities", []),
+            step=obs_data.get("step", 0),
+            done=payload.get("done", obs_data.get("done", False)),
+            reward=payload.get("reward", obs_data.get("reward", 0.0)),
+            terminated=obs_data.get("terminated", False),
+            truncated=obs_data.get("truncated", False),
+            verifier_flags=obs_data.get("verifier_flags", []),
+            verifier_scores=obs_data.get("verifier_scores", {}),
+        )
+
+        return StepResult(
+            observation=observation,
+            reward=payload.get("reward", obs_data.get("reward", 0.0)),
+            done=payload.get("done", obs_data.get("done", False)),
+        )
+
+    def _parse_state(self, payload: Dict) -> State:
+        """
+        Deserialize the server's state response.
+
+        Args:
+            payload: Raw JSON dict from the server.
+
+        Returns:
+            State object with episode_id and step_count.
+        """
+        return State(
+            episode_id=payload.get("episode_id"),
+            step_count=payload.get("step_count", 0),
+        )
