@@ -7,10 +7,7 @@ All static data imported from data.py
 import random
 from typing import Optional, Any
 from openenv.core import Environment, Observation, Action, State
-<<<<<<< HEAD
-=======
 from verifiers import run_all_verifiers
->>>>>>> 3b19865db6b55a9269ca68f7032be4bda95418f9
 from data import FOUNDERS, IDEAS, RESOURCES, PHASES, PHASE_GOALS
 
 MAX_STEPS = 50
@@ -68,14 +65,9 @@ class BharatState(State):
     cumulative_reward: float = 0.0
     done: bool = False
 
-<<<<<<< HEAD
-
-# ── Environment ───────────────────────────────────────────────
-=======
 MAX_STEPS = 50
 
 # ── Environment ──────────────────────────────────────────────
->>>>>>> 3b19865db6b55a9269ca68f7032be4bda95418f9
 
 class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState]):
     SUPPORTS_CONCURRENT_SESSIONS = True
@@ -111,8 +103,6 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
             self._f = matches[0] if matches else random.choice(FOUNDERS)
         else:
             self._f = random.choice(FOUNDERS)
-<<<<<<< HEAD
-=======
         self._phase_idx = 0
         self._step_count = 0
         self._cumulative_reward = 0.0
@@ -126,7 +116,6 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
         self._felt_judged = False
         self._last_verifier_flags = []
         self._last_verifier_scores = {}
->>>>>>> 3b19865db6b55a9269ca68f7032be4bda95418f9
         return self._observe(reward=0.0, terminated=False, truncated=False)
 
     def step(self, action: BharatAction, timeout_s=None, **kwargs) -> BharatObservation:
@@ -214,18 +203,10 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
             available_schemes=res["schemes"],
             available_tools=res["tools"],
             available_communities=res["communities"],
-<<<<<<< HEAD
-            step=self._step_count,
-            done=terminated or truncated,
-            reward=reward,
-            terminated=terminated,
-            truncated=truncated,
-=======
             step=self._step_count, done=terminated or truncated,
             reward=reward, terminated=terminated, truncated=truncated,
             verifier_flags=self._last_verifier_flags,
             verifier_scores=self._last_verifier_scores,
->>>>>>> 3b19865db6b55a9269ca68f7032be4bda95418f9
         )
 
     def _simulate_human(self, action: BharatAction) -> dict:
