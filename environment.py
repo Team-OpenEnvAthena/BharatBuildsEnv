@@ -2,6 +2,8 @@ import random
 from typing import Optional, Any
 from pydantic import BaseModel
 from openenv.core import Environment, Observation, Action, State
+from verifiers import run_all_verifiers
+from data import FOUNDERS, IDEAS, RESOURCES, PHASES, PHASE_GOALS
 
 # ── Pydantic Models ──────────────────────────────────────────
 
@@ -44,49 +46,14 @@ class BharatObservation(Observation):
     reward: float = 0.0
     terminated: bool = False
     truncated: bool = False
+    verifier_flags: list = []
+    verifier_scores: dict = {}
 
 class BharatState(State):
     phase: str = "IDEA_ARTICULATION"
     step_count: int = 0
     cumulative_reward: float = 0.0
     done: bool = False
-
-# ── Founder Data ─────────────────────────────────────────────
-
-FOUNDERS = [
-    dict(name="Priya",  location="Jhansi, UP",      tier="tier3", language="hinglish", domain="handicrafts", digital_literacy=0.3, capital_inr=5000,   prior_attempt=False, emotional_state="excited"),
-    dict(name="Ravi",   location="Nashik, MH",       tier="tier2", language="hinglish", domain="agritech",    digital_literacy=0.5, capital_inr=25000,  prior_attempt=True,  emotional_state="uncertain"),
-    dict(name="Meera",  location="Coimbatore, TN",   tier="tier2", language="english",  domain="edtech",      digital_literacy=0.7, capital_inr=15000,  prior_attempt=False, emotional_state="determined"),
-    dict(name="Suresh", location="Raipur, CG",       tier="tier3", language="hindi",    domain="healthtech",  digital_literacy=0.2, capital_inr=8000,   prior_attempt=True,  emotional_state="discouraged"),
-    dict(name="Anjali", location="Pune, MH",         tier="metro", language="english",  domain="edtech",      digital_literacy=0.9, capital_inr=100000, prior_attempt=False, emotional_state="excited"),
-]
-
-IDEAS = {
-    "handicrafts": "I want to help women in my village sell their handmade things online",
-    "agritech":    "Farmers near me do not know the right price to sell crops",
-    "edtech":      "There are no good tutors for competitive exams in small towns",
-    "healthtech":  "Old people in my area cannot use health apps",
-}
-
-RESOURCES = {
-    "handicrafts": dict(schemes=["MUDRA Shishu Loan up to 50k free","WEP Women Entrepreneurship Platform free","TRIFED Tribal Co-op"], tools=["Meesho seller zero investment","WhatsApp Catalog free","Instagram Shop free"], communities=["DIC District Industries Centre","Craftsvilla Seller Network"]),
-    "agritech":    dict(schemes=["PM Kisan","NABARD Rural Business Incubator free","RKVY-RAFTAAR"], tools=["WhatsApp Business free","Google Forms free","Canva free tier"], communities=["AgriStartup India","ICAR Krishi Vigyan Kendra"]),
-    "edtech":      dict(schemes=["Startup India Registration free","NSDC Skill India grant","AIM NITI Aayog"], tools=["Google Classroom free","YouTube free","Zoom Basic free"], communities=["EdTech India Slack","Teacher Innovator Network"]),
-    "healthtech":  dict(schemes=["Ayushman Bharat Digital Mission free","BIRAC BIG grant","DST NIDHI"], tools=["WhatsApp free","Google Sheets free","Practo free listing"], communities=["HealthTech India","Apollo Healthco Ecosystem"]),
-}
-
-PHASES = ["IDEA_ARTICULATION","VALIDATION","MVP_SCOPING","RESOURCE_MAPPING","BUILD_COMPANION","FIRST_CUSTOMER","SIGNAL_READING","DONE"]
-
-PHASE_GOALS = {
-    "IDEA_ARTICULATION": "Help founder turn a vague idea into a clear problem statement.",
-    "VALIDATION":        "Guide founder to talk to at least 5 real people.",
-    "MVP_SCOPING":       "Help founder identify the smallest possible test.",
-    "RESOURCE_MAPPING":  "Match founder to 3 accessible real resources.",
-    "BUILD_COMPANION":   "Unblock daily progress without deciding for them.",
-    "FIRST_CUSTOMER":    "Coach founder through first outreach.",
-    "SIGNAL_READING":    "Help founder make their own pivot or persist call.",
-    "DONE":              "Episode complete.",
-}
 
 MAX_STEPS = 50
 
@@ -110,6 +77,8 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
         self._tasks_ignored = 0
         self._felt_unblocked = False
         self._felt_judged = False
+        self._last_verifier_flags = []
+        self._last_verifier_scores = {}
 
     def reset(self, seed=None, episode_id=None, founder_name=None, **kwargs) -> BharatObservation:
         if seed is not None:
@@ -131,12 +100,33 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
         self._tasks_ignored = 0
         self._felt_unblocked = False
         self._felt_judged = False
+        self._last_verifier_flags = []
+        self._last_verifier_scores = {}
         return self._observe(reward=0.0, terminated=False, truncated=False)
 
     def step(self, action: BharatAction, timeout_s=None, **kwargs) -> BharatObservation:
+        # Run verifiers first — they shape the reward independently
+        verifier_state = self._verifier_state_dict()
+        vresult = run_all_verifiers(action.dict(), verifier_state)
+        self._last_verifier_flags = vresult.flags
+        self._last_verifier_scores = vresult.scores
+
+        if vresult.blocked:
+            # Hard safety block — strong penalty, episode continues but punished
+            reward = vresult.penalty
+            self._cumulative_reward += reward
+            self._step_count += 1
+            return self._observe(reward=reward, terminated=False, truncated=self._step_count >= MAX_STEPS)
+
+        # Simulate human response
         reaction = self._simulate_human(action)
         self._update_state(reaction)
-        reward = self._reward(action, reaction)
+
+        # Combine env reward + verifier reward
+        env_reward = self._reward(action, reaction)
+        verifier_reward = vresult.total
+        reward = env_reward + verifier_reward
+
         self._cumulative_reward += reward
         self._step_count += 1
         terminated = self._phase_idx >= len(PHASES)-1 or self._dropout_risk >= 1.0
@@ -153,6 +143,22 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
         )
 
     # ── Private ──────────────────────────────────────────────
+
+    def _verifier_state_dict(self) -> dict:
+        """Expose minimal state dict for verifiers (avoid circular imports)."""
+        f = self._f or FOUNDERS[0]
+        return {
+            "phase": PHASES[min(self._phase_idx, len(PHASES)-1)],
+            "founder": {
+                "digital_literacy": f["digital_literacy"],
+                "capital_inr":      f["capital_inr"],
+                "language":         f["language"],
+            },
+            "engagement": {
+                "dropout_risk": self._dropout_risk,
+                "tasks_completed": self._tasks_completed,
+            }
+        }
 
     def _observe(self, reward=0.0, terminated=False, truncated=False) -> BharatObservation:
         f = self._f or FOUNDERS[0]
@@ -176,6 +182,8 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
             available_communities=res["communities"],
             step=self._step_count, done=terminated or truncated,
             reward=reward, terminated=terminated, truncated=truncated,
+            verifier_flags=self._last_verifier_flags,
+            verifier_scores=self._last_verifier_scores,
         )
 
     def _simulate_human(self, action: BharatAction) -> dict:
