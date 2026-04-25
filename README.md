@@ -1,13 +1,4 @@
----
-title: BharatBuildsEnv
-colorFrom: orange
-colorTo: green
-sdk: docker
-pinned: true
-license: mit
----
-
-# 🇮🇳 BharatBuilds RL Environment
+# BharatBuilds RL Environment
 
 > *"McKinsey charges ₹5 crore to give a large company its strategy.  
 > We're training an AI to be that thinking partner for someone with ₹500 in their pocket and an idea that could change their community."*
