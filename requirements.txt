@@ -1,2 +1,5 @@
-openenv-core
+openenv-core>=0.2.3
 httpx
+fastapi
+uvicorn[standard]
+pydantic>=2.0

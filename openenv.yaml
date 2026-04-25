@@ -1,0 +1,99 @@
+name: BharatBuildsEnv
+version: 0.1.0
+description: 
+  A human-first startup co-founder RL environment for Indian entrepreneurs
+  from Tier 2/3 cities. Trains an LLM to be an empathetic, jargon-free,
+  resource-aware collaborative partner — not an autonomous agent.
+  The AI is rewarded for helping the human take real steps, not for
+  deciding for them.
+author: BharatBuilds Team
+theme: wild_card
+tags:
+  - startup
+  - india
+  - human-collaborative
+  - personalized
+  - social-impact
+
+environment:
+  class: BharatBuildsEnv
+  module: environment
+  supports_concurrent_sessions: true
+  max_steps: 50
+
+action_space:
+  type: structured
+  schema:
+    ai_response: str
+    suggested_task: str
+    task_rationale: str
+    used_jargon: bool
+    made_decision_for_human: bool
+    resource_recommended: str
+    emotional_tone: str
+
+observation_space:
+  type: structured
+  schema:
+    phase: str
+    phase_number: int
+    phase_goal: str
+    founder_name: str
+    founder_location: str
+    founder_tier: str
+    founder_language: str
+    founder_domain: str
+    founder_digital_literacy: float
+    founder_capital_inr: float
+    founder_prior_attempt: bool
+    founder_emotional_state: str
+    idea_description: str
+    validation_interviews_done: int
+    mvp_shipped: bool
+    first_customer: bool
+    dropout_risk: float
+    tasks_completed: int
+    tasks_ignored: int
+    felt_unblocked: bool
+    felt_judged: bool
+    available_schemes: list
+    available_tools: list
+    available_communities: list
+    step: int
+    done: bool
+    reward: float
+
+reward:
+  components:
+    - name: task_completion
+      weight: 10
+      description: Human took the suggested action
+    - name: retention
+      weight: 8
+      description: Human returned to the next session
+    - name: unblocked
+      weight: 6
+      description: Human felt unblocked, not judged
+    - name: phase_progression
+      weight: 20
+      description: Human advanced to the next startup phase
+    - name: first_customer
+      weight: 30
+      description: Human acquired their first customer
+    - name: journey_complete
+      weight: 50
+      description: Human completed all 7 phases
+    - name: verifier_composite
+      weight: variable
+      description: Safety, autonomy, accessibility, clarity, engagement, progress checks
+  penalties:
+    - jargon_for_low_literacy: -10
+    - deciding_for_human: -20
+    - felt_judged: -15
+    - dropout_signal: -25
+    - high_dropout_risk: -20
+
+server:
+  host: 0.0.0.0
+  port: 7860
+  framework: fastapi

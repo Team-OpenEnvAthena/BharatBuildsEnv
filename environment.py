@@ -7,6 +7,10 @@ All static data imported from data.py
 import random
 from typing import Optional, Any
 from openenv.core import Environment, Observation, Action, State
+<<<<<<< HEAD
+=======
+from verifiers import run_all_verifiers
+>>>>>>> 3b19865db6b55a9269ca68f7032be4bda95418f9
 from data import FOUNDERS, IDEAS, RESOURCES, PHASES, PHASE_GOALS
 
 MAX_STEPS = 50
@@ -54,6 +58,8 @@ class BharatObservation(Observation):
     reward: float = 0.0
     terminated: bool = False
     truncated: bool = False
+    verifier_flags: list = []
+    verifier_scores: dict = {}
 
 
 class BharatState(State):
@@ -62,8 +68,14 @@ class BharatState(State):
     cumulative_reward: float = 0.0
     done: bool = False
 
+<<<<<<< HEAD
 
 # ── Environment ───────────────────────────────────────────────
+=======
+MAX_STEPS = 50
+
+# ── Environment ──────────────────────────────────────────────
+>>>>>>> 3b19865db6b55a9269ca68f7032be4bda95418f9
 
 class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState]):
     SUPPORTS_CONCURRENT_SESSIONS = True
@@ -86,6 +98,8 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
         self._tasks_ignored = 0
         self._felt_unblocked = False
         self._felt_judged = False
+        self._last_verifier_flags = []
+        self._last_verifier_scores = {}
 
     def reset(self, seed=None, episode_id=None, founder_name=None, **kwargs) -> BharatObservation:
         if seed is not None:
@@ -97,12 +111,47 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
             self._f = matches[0] if matches else random.choice(FOUNDERS)
         else:
             self._f = random.choice(FOUNDERS)
+<<<<<<< HEAD
+=======
+        self._phase_idx = 0
+        self._step_count = 0
+        self._cumulative_reward = 0.0
+        self._interviews = 0
+        self._first_customer = False
+        self._mvp_shipped = False
+        self._dropout_risk = 0.0
+        self._tasks_completed = 0
+        self._tasks_ignored = 0
+        self._felt_unblocked = False
+        self._felt_judged = False
+        self._last_verifier_flags = []
+        self._last_verifier_scores = {}
+>>>>>>> 3b19865db6b55a9269ca68f7032be4bda95418f9
         return self._observe(reward=0.0, terminated=False, truncated=False)
 
     def step(self, action: BharatAction, timeout_s=None, **kwargs) -> BharatObservation:
+        # Run verifiers first — they shape the reward independently
+        verifier_state = self._verifier_state_dict()
+        vresult = run_all_verifiers(action.dict(), verifier_state)
+        self._last_verifier_flags = vresult.flags
+        self._last_verifier_scores = vresult.scores
+
+        if vresult.blocked:
+            # Hard safety block — strong penalty, episode continues but punished
+            reward = vresult.penalty
+            self._cumulative_reward += reward
+            self._step_count += 1
+            return self._observe(reward=reward, terminated=False, truncated=self._step_count >= MAX_STEPS)
+
+        # Simulate human response
         reaction = self._simulate_human(action)
         self._update_state(reaction)
-        reward = self._reward(action, reaction)
+
+        # Combine env reward + verifier reward
+        env_reward = self._reward(action, reaction)
+        verifier_reward = vresult.total
+        reward = env_reward + verifier_reward
+
         self._cumulative_reward += reward
         self._step_count += 1
         terminated = self._phase_idx >= len(PHASES) - 1 or self._dropout_risk >= 1.0
@@ -119,6 +168,22 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
         )
 
     # ── Private ───────────────────────────────────────────────
+
+    def _verifier_state_dict(self) -> dict:
+        """Expose minimal state dict for verifiers (avoid circular imports)."""
+        f = self._f or FOUNDERS[0]
+        return {
+            "phase": PHASES[min(self._phase_idx, len(PHASES)-1)],
+            "founder": {
+                "digital_literacy": f["digital_literacy"],
+                "capital_inr":      f["capital_inr"],
+                "language":         f["language"],
+            },
+            "engagement": {
+                "dropout_risk": self._dropout_risk,
+                "tasks_completed": self._tasks_completed,
+            }
+        }
 
     def _observe(self, reward=0.0, terminated=False, truncated=False) -> BharatObservation:
         f = self._f or FOUNDERS[0]
@@ -149,11 +214,18 @@ class BharatBuildsEnv(Environment[BharatAction, BharatObservation, BharatState])
             available_schemes=res["schemes"],
             available_tools=res["tools"],
             available_communities=res["communities"],
+<<<<<<< HEAD
             step=self._step_count,
             done=terminated or truncated,
             reward=reward,
             terminated=terminated,
             truncated=truncated,
+=======
+            step=self._step_count, done=terminated or truncated,
+            reward=reward, terminated=terminated, truncated=truncated,
+            verifier_flags=self._last_verifier_flags,
+            verifier_scores=self._last_verifier_scores,
+>>>>>>> 3b19865db6b55a9269ca68f7032be4bda95418f9
         )
 
     def _simulate_human(self, action: BharatAction) -> dict:
