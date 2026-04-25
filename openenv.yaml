@@ -1,6 +1,6 @@
 name: BharatBuildsEnv
 version: 0.1.0
-description: 
+description: >
   A human-first startup co-founder RL environment for Indian entrepreneurs
   from Tier 2/3 cities. Trains an LLM to be an empathetic, jargon-free,
   resource-aware collaborative partner — not an autonomous agent.
